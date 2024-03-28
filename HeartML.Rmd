@@ -1,0 +1,424 @@
+---
+title: "Predicting the Risk of Heart Attacks with Machine Learning Models"
+author: "Ankit Sharma"
+date: "UCSB Winter 2023"
+output:
+    html_document:
+      toc: true
+      toc_float: true
+      theme: readable
+      code_folding: hide  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The goal of this project is to build a machine learning model to predict whether or not someone is at high risk of having a heart attack based on a variety of factors. The data set I will be using for this project is called “Heart Attack Analysis & Prediction Data set”, and it can be obtained from Kaggle using the following, [Data Set Link](https://www.kaggle.com/datasets/rashikrahmanpritom/heart-attack-analysis-prediction-dataset). Throughout this project, I will be implementing several different machine learning techniques/models in order to yield the most accurate results for this binary classification problem.
+
+### Inspiration/Relevance
+
+Heart attack prediction is a critical component of cardiac health, and historically, cardiologists have relied on traditional risk assessment tools or their own clinical expertise to predict the likelihood of a heart attack. However, with the recent advent of data analysis and machine learning, there has been a significant shift in how heart attack prediction is approached. Technological companies like Google and Apple have developed algorithms and wearable devices that can monitor vital signs and detect potential cardiac issues. My goal is to contribute to this revolution by developing a heart attack prediction model that can decipher which of these parameters impacts cardiovascular health the most. By providing individuals with a better understanding of their risk, we can aim to prevent cardiac events before they occur and improve the overall health of the population.
+
+![Copyright Free Vector owned by ID 67034850 © Naschysillydog](/Users/ankitsharma/downloads/131archive/old-man-heart.jpg)
+
+### Project Outline
+
+To achieve our goal, we will follow a structured workflow that involves cleaning our data and removing any unnecessary predictor variables. Through further exploration, we will gain a better understanding of the relationship between the remaining variables, which we can use to predict a binary response variable. We will then perform a training/test split and implement a multiple fold cross-validation using various models, allowing us to then evaluate the performance of each model and select the highest performing one to fit on the testing data and assess the overall effectiveness.
+
+## Exploring the Data
+
+The very first step in any model building project should be importing the data into your IDE, as shown below.
+
+```{r, include="false"}
+library(tidymodels)
+library(ISLR)
+library(ISLR2)
+library(tidyverse)
+library(glmnet)
+library(modeldata)
+library(ggthemes)
+library(janitor)
+library(naniar)
+library(xgboost)
+library(ranger)
+library(vip)
+library(corrplot)
+library(discrim)
+tidymodels_prefer()
+```
+
+```{r class.source = 'fold-show'}
+#load data
+heart_data <- read.csv("/Users/ankitsharma/downloads/131archive/heart.csv")
+
+#clean/standardize predictor names
+heart_data <- as_tibble(heart_data) %>% 
+  clean_names()
+head(heart_data)
+```
+
+From this table we can gather that the data has well formatted predictors, which will come in handy later.
+
+```{r class.source = 'fold-show'}
+dim(heart_data)
+```
+
+Here we can see that the data set has 303 observations and 13 predictor variables along with 1 target variable.
+
+### Missing Data
+
+Missing data can cause a load of problems in the later steps of this project when we get to tuning and fitting models, so it's important to do checks like this for missing data early on to make sure we don't have to come back and correct it at a later step.
+
+```{r class.source = 'fold-show'}
+sum(is.na(heart_data))
+```
+
+As the given output above shows, the dataset isn't missing any values, so we will not have to remove any of the given predictors. Having no missing data will allow our future predictions/models to run much more smoothly.
+
+### Tidying Data
+
+Since there's no missing data, we won't have to drop any variables. We will, however, need to turn `output` and many more categorical variables into factors which is shown below. Doing so changes these variables from being numeric with certain numbers representing different string values to truly categorical variables where the string values are the indexes.
+
+```{r class.source = 'fold-show'}
+
+heart_data$output <- factor(heart_data$output, 
+                                  labels = c("low", "high"))
+heart_data$exng <- factor(heart_data$exng, 
+                                  labels = c("no", "yes"))
+heart_data$sex <- factor(heart_data$sex, 
+                                  labels = c("male", "female"))
+heart_data$cp <- factor(heart_data$cp, 
+                                  labels = c("typical angina", "asymptomatic", "non-anginal pain", "atypical angina"))
+heart_data$fbs <- factor(heart_data$fbs, 
+                                  labels = c("false", "true"))
+heart_data$slp <- factor(heart_data$slp, 
+                                  labels = c("down", "flat", "up"))
+heart_data$thall <- factor(heart_data$thall, 
+                                  labels = c("null", "fixed defect", "normal blood flow", "reversible defect"))
+heart_data$restecg <- factor(heart_data$restecg, 
+                                  labels = c("normal", "having ST-T wave abnormality", "showing ventricular hypertrophy"))
+```
+
+## Describing the Predictors
+
+* `age` : age of the patient
+
+* `sex` : sex of the patient (1 = male; 0 = female)
+
+* `exng` : exercise induced angina (1 = yes; 0 = no)
+
+* `cp` : chest pain type:     
+      1: asymptomatic
+      2: atypical angina
+      3: non-angina pain
+      4: typical angina
+  
+* `trtbps` : resting blood pressure (in mm Hg)
+
+* `chol` : cholesterol in mg/dl fetched via BMI sensor
+
+* `fbs` : fasting blood sugar > 120 mg/dl (1 = true; 0 = false)
+
+* `rest_ecg` : resting electrocardiograph results:     
+      0: normal
+      1: ST-T wave abnormality
+      2: probable left ventricular hypertrophy
+
+* `thalachh` : maximum heart rate achieved
+
+* `oldpeak` : ST depression induced by exercise relative to rest
+
+* `slp` : ST segment/heart rate slope:     
+      0: down sloping
+      1: flat
+      2: up sloping
+
+* `caa` : number of major vessels (0-3)
+
+* `thall` : blood disorder called thalassemia:     
+      0: NULL
+      1: fixed defect (no flow)
+      2: normal blood flow
+      3: reversible defect (abnormal flow)
+
+* `output` : 0 = low risk of heart attack, 1 = high risk of heart attack
+
+## Visual EDA
+
+So the first thing we want to look at is a distribution of how many patients are high risk vs low risk for the `output` variable.
+
+```{r}
+heart_data %>% 
+  ggplot(aes(x = output)) +
+  geom_bar() + 
+  labs(x = "Risk of Heart Attack", y = "# of Patients", title = "Distribution of Patients based on Risk of Heart Attack")
+```
+
+As shown above, the distribution is relatively even but definitely favors to the column of the high risk parameter, so this gives some insight on the initial bias of the data set compared to a real world sample. The given case of our experiment allows us to infer that the sample is pertaining to people predisposed with symptoms of heart disease or something to a similar effect. This does not reduce the effectiveness of the model whatsoever, but rather moves the scale of the experiment to a smaller niche. Additional value also comes from finding predictors that have common patterns in high risk patients that can be flagged as indicative signs.
+
+### Variable Correlation Plot
+
+Next, in order to get a general estimate of the relationships between the numeric variables, we can set up a correlation matrix and heat map for the relevant predictors.
+
+```{r}
+heart_data %>%
+  select(where(is.numeric)) %>%
+  cor() %>%
+  corrplot()
+```
+
+The first thing that caught my eye in this plot is how the first row, age, has some degree of correlation with every other variable listed, so it will be interesting to see how age plays a factor on the highest performing predictors. Another meaningful correlation appears to be one between thalachh and oldpeak, which is a negative correlation in nature and could have interesting implications on the model since blood pressure is a well known risk factor when it comes to cardiology.
+
+### Age Distribution Plot
+
+Since we already mentioned both `age` and `thalachh` as potentially meaningful predictors, and they have a relatively strong negative correlation to each other. It could be useful to plot how both relate to each other.
+
+```{r}
+heart_data %>% 
+  ggplot(aes(x=age, y=thalachh)) + 
+  geom_jitter(width = 0.5, size = 1) +
+  geom_smooth(method = "lm", se =F, col="darkred") +
+  labs(title = "Age vs. Maximum Heart Rate")
+```
+
+From this plot we can gather that the general age of patients throughout the sample tends to fall between 40 and 70 (with pretty even distribution), while thalachh falls roughly between 100 and 200. We can also confirm the negative correlation that the two predictors displayed in the heat map, and use it to judge the other coefficients.
+
+### Resting Blood Pressure
+
+Setting a foundation for how resting blood pressure affects risk of heart attack could also help provide more insight into the meaning of other metric based data (in terms of mm Hg).
+
+```{r}
+ggplot(heart_data, aes(trtbps)) + 
+  geom_bar(aes(fill = output)) +
+  scale_fill_manual(values = c("black", "brown"))
+```
+
+So this plot is generally less indicative of any significant relationship, but we can infer that there is a general range (120 to 150) that most people tend to fall in for resting blood pressure that deems them less healthy than the rest.
+
+## Setting Up Models
+
+With our newfound deepened understanding of the data set, we can move on to building our models, which will include splitting our data into training and testing sets, creating our recipe, and establishing cross-validation within our models.
+
+### Training/Testing Split
+
+We now need to split our data into two separate data sets. One will be used for the training, and the other will be for testing, which is saved till the end when our model has already been trained. I decided to go with a 75/25 split for this data because the testing data set will still have enough observations to not sacrifice quality. We will also set our seed so that our results can be reproduced.
+
+```{r class.source = 'fold-show'}
+set.seed(2048)
+
+heart_split <- initial_split(heart_data, prop = 0.75, 
+                              strata = "output")
+
+heart_train <- training(heart_split)
+heart_test <- testing(heart_split)
+
+#Dimensions of training set
+dim(heart_train)
+
+#Dimensions of testing set
+dim(heart_test)
+```
+
+The split looks accurate to what we defined and has sufficient observations in each set.
+
+### Building Recipe
+
+Now we can begin with building the heart of our model, which is the recipe. Since all external factors in the data such as predictors and model conditions will be remaining constant, we can use one recipe for all the different models. We will be including all of our various predictors, as it is uncertain from our previous exploration which ones will actually have the greatest effect. We will need to dummy code all of our categorical predictors, while also scaling and centering all predictors.
+
+```{r class.source = 'fold-show'}
+heart_recipe <- recipe(output ~ age + sex + cp + trtbps + chol + fbs + restecg 
+                        + thalachh + exng + oldpeak + slp + caa + thall,
+                        data=heart_train) %>%
+  step_dummy(sex) %>% # dummy predictor on categorical variables
+  step_dummy(cp) %>%
+  step_dummy(exng) %>%
+  step_dummy(fbs) %>%
+  step_dummy(slp) %>%
+  step_dummy(thall) %>%
+  step_dummy(restecg) %>%
+  step_scale(all_predictors()) %>% # standardizing our predictors
+  step_center(all_predictors())
+```
+
+### K-Fold Cross Validation
+
+We can now stratify our cross validation on our response variable, and use 10 folds to perform cross validation. We are stratifying the data based on our output variable, which will help the model account for imbalanced data since each fold is a new look.
+
+```{r class.source = 'fold-show'}
+heart_folds <- vfold_cv(heart_train, v = 10, strata = output)
+```
+
+To reduce net computing time, we will be saving the results to an RDA file, so we can load and access them anytime. 
+
+```{r, eval=FALSE}
+save(heart_folds, heart_recipe, heart_train, heart_test, file = "/Users/ankitsharma/downloads/131archive/heart_Model_Setup.rda")
+```
+
+## Building Our Models
+
+Fortunately, due to the small size of our data set, we are able to run multiple model variations and tune our parameters without inducing significant computational costs. However, since the models still require considerable computing power, we can't run them directly in this R markdown file. Therefore, we will take the approach of running each model in a separate R file, loading in the data we had prepared earlier. After running each model, we can save the results in R files for further analysis. These files will be loaded below as we explore the outcomes of our modeling efforts.
+
+To build our models we need to decide which models we will run, then we can follow a relatively procedural series of steps for each model with slight variation to account for the differences. The models I have decided to use for this project are Logistic Regression, Linear Discriminant, K-Nearest Neighbors, Decision Tree, and Random Forest. The rough steps of the model building process and performance analysis are listed below.
+
+### Model Procedure & Performance
+
+* Set up the model by specifying the type of model, engine, and mode
+
+* Set up the workflow for the model, add the new model, and add our previously made recipe.
+
+* If the model has hyper parameters that need to be tuned, set up the tuning grid and select most accurate model
+
+* We then fit that model to our workflow with the training data set and save the results
+
+To evaluate performance, the metric we will be using is roc_auc because it shows the greatest efficiency in a binary classification model when the data is not perfectly balanced to begin with.
+
+## Model Results
+
+With our data set's respective size of our data, the models took about an hour to run all of them, which is much quicker than they would've ran with a large data set. With the completed models and their results saves, we can load them all in and begin our analysis.
+
+```{r}
+load("/Users/ankitsharma/downloads/131archive/heart_Logistic_Regression.rda")
+load("/Users/ankitsharma/downloads/131archive/heart_Linear_Discriminant.rda")
+load("/Users/ankitsharma/downloads/131archive/heart_KNN.rda")
+load("/Users/ankitsharma/downloads/131archive/heart_Decision_Tree.rda")
+load("/Users/ankitsharma/downloads/131archive/heart_Random_Forest.rda")
+```
+
+The autoplot function will be our primary tool for visualizing the relationships in terms of our performance metric roc_auc.
+
+### Decision Tree Plot
+
+For the decision tree, we can see the slopes are segmented meaning that up until certain thresholds selecting more nodes minimally affects the performance metric. When it does cross these critical points, we can see a generally negative correlation between the two axes, with some exceptions here and there. 
+
+```{r}
+autoplot(heart_dt_tune_res)
+```
+
+### Random Forest Plot
+
+In the random forest model, we tuned three different hyper parameters being: mtry which represents the number of predictors that are sampled, trees which represent the amount of trees present in each iteration, and min_n which represents the minimum amount of data values required in a node in order to split further.
+
+The roc_auc values seem to vary a lot depending on the number of trees, but overall it is clear that more trees leads to a higher roc_auc value. On the other hand, we cannot make the same claim with Node Size or Number of Predictors. 
+
+```{r}
+autoplot(heart_rf_tune_res_auc)
+```
+
+### K-Nearest Neighbor Plot
+
+Here we can see that the roc_auc has a clear positive relationship with the amount of nearest neighbors. The rate of increase seems to decrease as the number of neighbors increase, so it will probably level off and have any further changes be marginal as the limit approaches infinity. For this plot in specific, the highest roc_auc displayed value appears to approximately fall below 0.87.
+
+```{r}
+autoplot(knn_tune)
+```
+
+### Model Accuracies
+
+We can now compare the summarized values of roc_auc from our various models and see which performed the best.
+
+```{r}
+heart_log_reg_auc <- augment(heart_log_fit, new_data = heart_train) %>%
+  roc_auc(output, estimate = .pred_low) %>%
+  dplyr::select(.estimate)
+
+heart_lda_auc <- augment(heart_lda_fit, new_data = heart_train) %>%
+  roc_auc(output, estimate = .pred_low) %>%
+  dplyr::select(.estimate)
+
+knn_rmse <- collect_metrics(knn_tune) %>% 
+  arrange(mean) %>% 
+  slice(4)
+
+heart_decision_tree_auc <- augment(heart_dt_final_fit, new_data = heart_train) %>%
+  roc_auc(output, estimate = .pred_low) %>%
+  dplyr::select(.estimate)
+
+heart_random_forest_auc <- augment(heart_rf_final_fit_auc, new_data = heart_train) %>%
+  roc_auc(output, estimate = .pred_low) %>%
+  dplyr::select(.estimate)
+
+heart_roc_aucs <- c(heart_log_reg_auc$.estimate,
+                           heart_lda_auc$.estimate,
+                           knn_rmse$mean,
+                           heart_decision_tree_auc$.estimate,
+                           heart_random_forest_auc$.estimate)
+
+model_names <- c("Logistic Regression", "LDA", "KNN", "Decision Tree", "Random Forest")
+```
+
+```{r}
+heart_results <- tibble(Model = model_names,
+                             ROC_AUC = heart_roc_aucs)
+
+heart_results <- heart_results %>% 
+  dplyr::arrange(-heart_roc_aucs)
+
+heart_results
+```
+
+From the tibble above, we can deduce that the Random Forest model was the best performing model at a roc_auc value of 0.9847, and the second best was surprisingly the logistic regression. So we can see from this that a higher complexity in a given model doesn't always guarantee better results, but rather the fit to the data is what allows a model to make predictions accurately.
+
+## Best Performing Model
+
+Since the Random Forest model performed the best, as stated above, we can deep dive into its results and see what interesting correlations/discoveries we can find!
+
+First let us being by seeing which Random Forest model among all the different iterations performed the best.
+
+```{r}
+show_best(heart_rf_tune_res_auc, metric = "roc_auc") %>%
+  select(-.estimator, .config) %>%
+  slice(1)
+```
+
+So here we can see the infamous top model is Random Forest Model #442 with a mean of 0.8934 and std_err of 0.0213, now we can proceed by fitting the model on our testing data and see the results. 
+
+### Final ROC_AUC Results
+
+Now we fit our top model onto the testing data and hope for the best!
+
+```{r}
+heart_rf_roc_auc <- augment(heart_rf_final_fit_auc, new_data = heart_test, type = 'prob') %>%
+  roc_auc(output, .pred_low) %>%
+  select(.estimate)
+
+heart_rf_roc_auc
+```
+
+So with the final roc_auc value of 0.8289, it is safe to say our model performed pretty well! With 0.7-0.8 being the general range of our performance metric, we can infer that the model exceeded expectations slightly. With this being said, in the case of life and death there is almost no margin of error allowed, so in an idealistic world we would hope to further improve this model throughout the coming years.
+
+### ROC Curve
+
+To better understand the above score, we can use this ROC Curve plot. The best way to judge this plot is to understand the ideal case, which would be the dark black line intersecting perpendicularly at the top left of the graph. So we can clearly see that there is room improvement, but the correlation is in the right direction, which confirms our data above.
+
+```{r}
+augment(heart_rf_final_fit_auc, new_data = heart_test, type = 'prob') %>%
+  roc_curve(output, .pred_low) %>%
+  autoplot()
+```
+
+### Variable Importance
+
+Since our best performing model was a random forest, we can use a VIP plot to see which of our predictors was most important in determining our outcome variable.
+
+```{r}
+heart_rf_final_fit_auc %>% 
+  extract_fit_engine() %>% 
+  vip(aesthetics = list(fill = "brown", color = "black"))
+```
+
+From this plot we can see that the most crucial predictor was thalachh, which represents a patient's maximum heart rate achieved. As heart attacks are spikes of heart rate accompanied with other risks, this makes a lot of logical sense and provides us with a word of warning on watching our general heart rate. Another interesting mention is that, as we predicted in our EDA, age was a significant factor in predicting the outcome likely due to the correlation it had with many other nominal predictors.
+
+## Conclusion
+
+Throughout this project, we have covered many of the core concepts of Data Science and model building. Whether it was tidying the data or tuning a Random Forest, we worked towards the goal of predicting heart risk and succeeded in building a mostly accurate model. Even with a performance of 82.9%, we can safely say that there is room to improve the model in the future.
+
+One simple metric that could be changed to quickly improve the model performance could be increasing the sample size, as the more data the model runs through the more chances it has to make inferences and draw conclusions. Since our initial data set was on the smaller side of the spectrum coming in at 303 observations, even doubling the number of observations with a uniquely distributed sample could make a world of difference. Another factor could be adding more predictors that induce high importance similar to what we saw with thalachh. To find new metrics like this, an approach of thinking outside the box and looking at factors like average amount of sleep or calories consumed on a daily basis could greatly improe the scope of the experiment. Looking at data with a distribution that better aligns with the general population rather than patients with existing conditions could also help these results impact more people's daily lives.
+
+The model result that surprised me the most in this project was the K-Nearest Neighbors, as it was the only model to have a worse roc_auc than 0.9 in the sample where models were fit to the training data. It's score of 0.86 implies that the kind of spatial approach it takes didn't mesh well with the distribution of data we had. 
+
+Overall, my biggest takeaway from this project was gaining an appreciation for the true value of data. In this modern age of big data and all this information being tracked and sold, it's interesting to see what kinds of inferences can be made from even a relatively small set like this. It makes one wonder what these large corporations like Google and Meta are churning with the vast, vast amounts of behavioral data and computing power at their disposal. In this sea of observations and predictors, it's good to see that we the people have lots of potential for growth, even if it is just one beat at a time.
+
+![Copyright Free Image by catalyststuff on Freepik](/Users/ankitsharma/downloads/131archive/happy_heart.jpg)
