@@ -16,7 +16,4 @@ Here are some ideas to get you started:
 <li>💼 Looking for new opportunities!</li>
 <li>This is a repo for some of my projects done throughout school</li>
 <li>📫 Let's talk! Reach me at my email <a target="_blank" rel="noopener noreferrer" href="mailto:ankits2001@gmail.com">ankits2001@gmail.com</a> or on <a target="_blank" rel="noopener noreferrer" href="https://www.linkedin.com/in/ankit-sharmaa/">linkedin/ankit-sharmaa</a></li>
-<br>
-<h4>Languages & Tools:</h4>
-<br>
 <p>
